@@ -17,7 +17,7 @@ $iscc = @(
 
 if (-not $SkipInstaller -and $iscc) {
     & $iscc "installer\msfs-resume.iss"
-    Write-Host "Installer: dist\MSFSResumeSetup-0.4.0.exe"
+    Write-Host "Installer: dist\MSFSResumeSetup-0.4.1.exe"
 } else {
     Write-Host "PyInstaller folder: dist\MSFSResume\"
     if (-not $iscc) {

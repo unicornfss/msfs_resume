@@ -2,6 +2,10 @@
 
 All notable changes to MSFS Resume are listed here.
 
+## 0.4.1
+
+- Fix installer launch crash (`attempted relative import with no known parent package`)
+
 ## 0.4.0
 
 - File and Help menus; SimBrief, fuel tolerance and always-on-top moved to Settings

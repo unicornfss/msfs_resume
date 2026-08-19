@@ -12,7 +12,7 @@ Virtual airlines are welcome to get in touch about incorporating resume into the
 
 ## Install
 
-Download `MSFSResumeSetup-0.4.0.exe` from [Releases](https://github.com/unicornfss/msfs-resume/releases) and run it. The installer does not need administrator rights.
+Download `MSFSResumeSetup-0.4.1.exe` from [Releases](https://github.com/unicornfss/msfs_resume/releases) and run it. The installer does not need administrator rights.
 
 Portable copy: unzip or copy the `MSFSResume` folder and run `MSFSResume.exe`.
 
@@ -49,6 +49,6 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 Output:
 
 - `dist\MSFSResume\` — portable app folder
-- `dist\MSFSResumeSetup-0.4.0.exe` — Windows installer (if Inno Setup is installed)
+- `dist\MSFSResumeSetup-0.4.1.exe` — Windows installer (if Inno Setup is installed)
 
 After the repo exists, publish a Release with the installer attached so in-app update checks can find it.

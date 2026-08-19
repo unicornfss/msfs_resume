@@ -4,7 +4,7 @@ from pathlib import Path
 root = Path(SPECPATH)
 
 a = Analysis(
-    [str(root / "msfs_resume" / "__main__.py")],
+    [str(root / "launch.py")],
     pathex=[str(root)],
     binaries=[],
     datas=[
