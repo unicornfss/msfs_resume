@@ -1,0 +1,32 @@
+MSFS Resume Freeware Licence
+
+Copyright (c) 2026 Ostroforge <ostroforge@outlook.com>
+
+This software is freeware.
+
+You may use, copy, and share MSFS Resume free of charge for personal,
+non-commercial purposes.
+
+You may not:
+  - sell this software or any modified version of it
+  - charge for access, distribution, or support as a product
+  - otherwise use it to generate profit
+without prior written permission from the copyright holder.
+
+This restriction is intended to keep the program free for simmers. Virtual
+airlines and individuals may use it at no cost. Commercial resale, bundling
+for sale, or paywalled redistribution is not allowed.
+
+Virtual airlines may contact ostroforge@outlook.com about incorporating
+resume into their own flight-logging software. For freeware (no-charge)
+virtual airlines, that assistance is free. No guarantee is given about
+how long it may take, or whether implementation will succeed. For-profit
+or paywalled VAs should discuss terms by email first.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
