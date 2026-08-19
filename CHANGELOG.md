@@ -2,6 +2,17 @@
 
 All notable changes to MSFS Resume are listed here.
 
+## 0.4.3
+
+- Check for updates downloads the installer and can run it (the app closes so files can be replaced)
+- Smaller installer by omitting unused image codecs (especially AVIF)
+- Icon is a gold disc with a navy resume mark (readable in the title bar)
+
+## 0.4.2
+
+- New app icon in the title bar, Start menu and tray (navy disc with a resume play mark)
+- Use this release to confirm Help → Check for updates from 0.4.1
+
 ## 0.4.1
 
 - Fix installer launch crash (`attempted relative import with no known parent package`)

@@ -40,7 +40,7 @@ If a flight is recording you will be asked to Cancel, Minimise to the tray, or E
 
 Help → Error log — restore failures and other errors. You can email the log to ostroforge@outlook.com.
 
-Help → Check for updates — on startup, and from this menu, you are asked if a newer version is available.
+Help → Check for updates — if a newer version is available you are asked, then the installer is downloaded. You can run it straight away; MSFS Resume closes so the files can be replaced.
 
 Help → Changelog — what changed in each version.
 

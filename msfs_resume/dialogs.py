@@ -160,3 +160,46 @@ def confirm_exit_while_recording(parent: tk.Tk) -> str:
     win.protocol("WM_DELETE_WINDOW", lambda: choose("cancel"))
     parent.wait_window(win)
     return result["value"]
+
+
+class DownloadProgress:
+    """Non-blocking progress window for installer download."""
+
+    def __init__(self, parent: tk.Tk, filename: str) -> None:
+        self.cancelled = False
+        self.win = tk.Toplevel(parent)
+        self.win.title("Downloading update")
+        self.win.configure(bg=BG)
+        self.win.geometry("420x160")
+        self.win.transient(parent)
+        self.win.protocol("WM_DELETE_WINDOW", self.cancel)
+        pad = tk.Frame(self.win, bg=PANEL)
+        pad.pack(fill="both", expand=True, padx=16, pady=16)
+        tk.Label(pad, text="Downloading installer", fg=GOLD, bg=PANEL, font=(FONT, 12, "bold")).pack(anchor="w")
+        tk.Label(pad, text=filename, fg=MUTED, bg=PANEL, font=(FONT, 9)).pack(anchor="w", pady=(4, 10))
+        self._status = tk.StringVar(value="Starting…")
+        tk.Label(pad, textvariable=self._status, fg=TEXT, bg=PANEL, font=(FONT, 9)).pack(anchor="w")
+        self.bar = ttk.Progressbar(pad, mode="determinate", maximum=100)
+        self.bar.pack(fill="x", pady=(8, 12))
+        tk.Button(pad, text="Cancel", command=self.cancel, bg=PANEL_2, fg=TEXT, relief="flat", padx=10, pady=6).pack(anchor="e")
+
+    def cancel(self) -> None:
+        self.cancelled = True
+        self._status.set("Cancelling…")
+
+    def set_progress(self, got: int, total: int) -> None:
+        if total > 0:
+            self.bar.configure(mode="determinate", maximum=100)
+            self.bar["value"] = min(100, int(got * 100 / total))
+            self._status.set(f"{got / (1024 * 1024):.1f} MB of {total / (1024 * 1024):.1f} MB")
+        else:
+            self.bar.configure(mode="indeterminate")
+            self.bar.start(12)
+            self._status.set(f"{got / (1024 * 1024):.1f} MB downloaded")
+
+    def close(self) -> None:
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+

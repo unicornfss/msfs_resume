@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from .paths import bundled_file
 from PIL import Image, ImageDraw
 
 
 def _icon_image() -> Image.Image:
+    ico = bundled_file("assets", "msfs-resume.ico")
+    if ico.exists():
+        return Image.open(ico).convert("RGBA").resize((64, 64))
     image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.ellipse((4, 4, 60, 60), fill=(22, 24, 29, 255))
-    draw.ellipse((10, 10, 54, 54), outline=(212, 180, 90, 255), width=4)
-    draw.polygon([(32, 16), (44, 40), (20, 40)], fill=(212, 180, 90, 255))
+    draw.ellipse((4, 4, 60, 60), fill=(212, 180, 90, 255))
+    draw.rectangle((14, 16, 24, 48), fill=(18, 28, 48, 255))
+    draw.polygon([(26, 16), (50, 32), (26, 48)], fill=(18, 28, 48, 255))
     return image
 
 

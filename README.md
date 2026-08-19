@@ -12,7 +12,7 @@ Virtual airlines are welcome to get in touch about incorporating resume into the
 
 ## Install
 
-Download `MSFSResumeSetup-0.4.1.exe` from [Releases](https://github.com/unicornfss/msfs_resume/releases) and run it. The installer does not need administrator rights.
+Download `MSFSResumeSetup-0.4.3.exe` from [Releases](https://github.com/unicornfss/msfs_resume/releases) and run it. The installer does not need administrator rights.
 
 Portable copy: unzip or copy the `MSFSResume` folder and run `MSFSResume.exe`.
 
@@ -33,7 +33,7 @@ Or double-click `run.bat`.
 - SimBrief username, fuel tolerance and always-on-top are under **File → Settings**.
 - Exit is **File → Exit**. If a flight is recording you can cancel, minimise to the tray, or exit.
 - Failures are written to `%AppData%\MsfsResume\error.log` (**Help → Error log**). You can email that log from the same screen.
-- **Help → Check for updates** asks before anything is downloaded.
+- **Help → Check for updates** downloads the installer and can run it.
 
 See `HELP.md` for the full guide.
 
@@ -49,6 +49,6 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 Output:
 
 - `dist\MSFSResume\` — portable app folder
-- `dist\MSFSResumeSetup-0.4.1.exe` — Windows installer (if Inno Setup is installed)
+- `dist\MSFSResumeSetup-0.4.3.exe` — Windows installer (if Inno Setup is installed)
 
 After the repo exists, publish a Release with the installer attached so in-app update checks can find it.

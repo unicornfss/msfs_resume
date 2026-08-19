@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import messagebox
@@ -13,6 +14,7 @@ from .airports import Airport, load_cache, min_runway_ft, nearest_suitable, refr
 from .applog import log_exception, logger, setup_logging
 from .constants import CONTACT_EMAIL
 from .dialogs import (
+    DownloadProgress,
     confirm_exit_while_recording,
     open_about,
     open_changelog,
@@ -26,9 +28,10 @@ from .settings import load_settings, save_settings
 from .simbrief import SimBriefError, fetch_latest_ofp
 from .simconnect_client import SimConnectClient
 from .snapshot import FlightSnapshot, clear_snapshot, load_snapshot, save_snapshot
+from .paths import bundled_file
 from .tray import TrayIcon
-from .updates import check_for_updates
-from .win_window import disable_close_button
+from .updates import check_for_updates, download_installer, installer_dest
+from .win_window import apply_window_icon, disable_close_button
 
 BG = "#16181d"
 PANEL = "#22262e"
@@ -116,12 +119,16 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._request_exit)
         self.bind("<Unmap>", self._on_unmap)
         self.attributes("-topmost", bool(self.settings.get("always_on_top")))
-        self.after(400, lambda: disable_close_button(self))
+        self.after(400, self._apply_chrome)
         self.client.start()
         self.after(200, self._show_mode)
         self.after(400, self._tick)
         self.after(2500, lambda: self._check_updates(True))
         threading.Thread(target=self._load_airports, daemon=True).start()
+
+    def _apply_chrome(self) -> None:
+        apply_window_icon(self, bundled_file("assets", "msfs-resume.ico"))
+        disable_close_button(self)
 
     def _build(self) -> None:
         menubar = tk.Menu(self)
@@ -284,12 +291,19 @@ class App(tk.Tk):
 
             def notify() -> None:
                 if info.available:
-                    if messagebox.askyesno(
+                    if not messagebox.askyesno(
                         "Update available",
                         f"MSFS Resume {info.latest} is available (you have {info.current}).\n\n"
-                        "Do you want to download the update?",
+                        "Download and install it now?",
                     ):
-                        webbrowser.open(info.url)
+                        return
+                    if not info.installer_url:
+                        messagebox.showerror(
+                            "Updates",
+                            "An update is available but no installer was attached to it.",
+                        )
+                        return
+                    self._download_update(info)
                 elif not silent:
                     messagebox.showinfo(
                         "Updates",
@@ -299,6 +313,62 @@ class App(tk.Tk):
             self.after(0, notify)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _download_update(self, info) -> None:
+        dest = installer_dest(info.installer_name or f"MSFSResumeSetup-{info.latest}.exe")
+        dialog = DownloadProgress(self, dest.name)
+
+        def worker() -> None:
+            error = None
+            try:
+                download_installer(
+                    info.installer_url,
+                    dest,
+                    progress=lambda got, total: self.after(0, dialog.set_progress, got, total),
+                    should_cancel=lambda: dialog.cancelled,
+                )
+            except Exception as exc:
+                error = exc
+                if "cancelled" not in str(exc).lower():
+                    log_exception("Update download failed", exc)
+
+            def done() -> None:
+                dialog.close()
+                if dialog.cancelled:
+                    return
+                if error:
+                    messagebox.showerror("Updates", f"Could not download the installer.\n\n{error}")
+                    return
+                if messagebox.askyesno(
+                    "Install update",
+                    f"The installer has been saved to:\n{dest}\n\n"
+                    "MSFS Resume will close so the files can be replaced. Install now?",
+                ):
+                    self._run_installer(dest)
+
+            self.after(0, done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _run_installer(self, dest) -> None:
+        recording = self._mode == "record" and self.tracker.phase == RECORDING
+        if recording:
+            choice = confirm_exit_while_recording(self)
+            if choice != "exit":
+                if choice == "minimise":
+                    self.iconify()
+                messagebox.showinfo("Updates", f"The installer is still at:\n{dest}")
+                return
+        try:
+            subprocess.Popen([str(dest)], close_fds=True)
+        except OSError as exc:
+            log_exception("Could not start installer", exc)
+            messagebox.showerror(
+                "Updates",
+                f"Could not start the installer.\n\n{exc}\n\nFile:\n{dest}",
+            )
+            return
+        self._force_exit()
 
     def _save_tol(self) -> None:
         try:
