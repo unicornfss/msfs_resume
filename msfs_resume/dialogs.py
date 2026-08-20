@@ -31,23 +31,31 @@ def _style_win(win: tk.Toplevel, title: str, size: str = "520x420") -> None:
 
 def open_settings(parent: tk.Tk, settings: dict, on_apply) -> None:
     win = tk.Toplevel(parent)
-    _style_win(win, "Settings", "440x260")
+    _style_win(win, "Settings", "440x380")
     pad = tk.Frame(win, bg=PANEL)
     pad.pack(fill="both", expand=True, padx=16, pady=16)
 
     simbrief = tk.StringVar(value=str(settings.get("simbrief_username", "")))
     tol = tk.StringVar(value=str(settings.get("fuel_tolerance_pct", 5)))
     topmost = tk.BooleanVar(value=bool(settings.get("always_on_top")))
+    tray = tk.BooleanVar(value=bool(settings.get("start_in_tray")))
+    hint = tk.BooleanVar(value=bool(settings.get("show_tray_hint")))
 
     tk.Label(pad, text="SimBrief username or ID", fg=MUTED, bg=PANEL, font=(FONT, 9)).pack(anchor="w")
     tk.Entry(pad, textvariable=simbrief, bg=PANEL_2, fg=TEXT, insertbackground=TEXT, relief="flat").pack(fill="x", pady=(2, 10))
     tk.Label(pad, text="Fuel restore tolerance %", fg=MUTED, bg=PANEL, font=(FONT, 9)).pack(anchor="w")
     ttk.Spinbox(pad, from_=1, to=25, increment=1, textvariable=tol, width=8).pack(anchor="w", pady=(2, 10))
-    tk.Checkbutton(
-        pad, text="Always on top", variable=topmost, fg=TEXT, bg=PANEL,
-        activebackground=PANEL, activeforeground=TEXT, selectcolor=PANEL_2,
-        font=(FONT, 9), highlightthickness=0,
-    ).pack(anchor="w", pady=(0, 14))
+
+    def _check(text: str, var: tk.BooleanVar) -> None:
+        tk.Checkbutton(
+            pad, text=text, variable=var, fg=TEXT, bg=PANEL,
+            activebackground=PANEL, activeforeground=TEXT, selectcolor=PANEL_2,
+            font=(FONT, 9), highlightthickness=0,
+        ).pack(anchor="w", pady=(0, 6))
+
+    _check("Always on top", topmost)
+    _check("Start in the system tray", tray)
+    _check("Show a reminder when starting in the tray", hint)
 
     def apply() -> None:
         try:
@@ -56,11 +64,13 @@ def open_settings(parent: tk.Tk, settings: dict, on_apply) -> None:
             pass
         settings["simbrief_username"] = simbrief.get().strip()
         settings["always_on_top"] = bool(topmost.get())
+        settings["start_in_tray"] = bool(tray.get())
+        settings["show_tray_hint"] = bool(hint.get())
         save_settings(settings)
         on_apply()
         win.destroy()
 
-    tk.Button(pad, text="Save", command=apply, bg=GOLD, fg="#1a1408", font=(FONT, 10, "bold"), relief="flat", pady=6).pack(fill="x")
+    tk.Button(pad, text="Save", command=apply, bg=GOLD, fg="#1a1408", font=(FONT, 10, "bold"), relief="flat", pady=6).pack(fill="x", pady=(10, 0))
 
 
 def open_text_window(parent: tk.Tk, title: str, text: str) -> None:
@@ -160,6 +170,88 @@ def confirm_exit_while_recording(parent: tk.Tk) -> str:
     win.protocol("WM_DELETE_WINDOW", lambda: choose("cancel"))
     parent.wait_window(win)
     return result["value"]
+
+
+def _choice_dialog(parent: tk.Tk, title: str, heading: str, body: str, buttons: list[tuple[str, str]]) -> str:
+    win = tk.Toplevel(parent)
+    _style_win(win, title, "480x240")
+    result = {"value": buttons[-1][0]}
+    pad = tk.Frame(win, bg=PANEL)
+    pad.pack(fill="both", expand=True, padx=16, pady=16)
+    tk.Label(pad, text=heading, fg=GOLD, bg=PANEL, font=(FONT, 12, "bold")).pack(anchor="w")
+    tk.Label(pad, text=body, fg=TEXT, bg=PANEL, font=(FONT, 9), wraplength=430, justify="left").pack(anchor="w", pady=(8, 16))
+    btns = tk.Frame(pad, bg=PANEL)
+    btns.pack(fill="x")
+
+    def choose(value: str) -> None:
+        result["value"] = value
+        win.destroy()
+
+    for i, (value, label) in enumerate(buttons):
+        style = {"bg": GOLD, "fg": "#1a1408"} if i == 0 else {"bg": PANEL_2, "fg": TEXT}
+        tk.Button(
+            btns, text=label, command=lambda v=value: choose(v),
+            relief="flat", padx=10, pady=7, **style,
+        ).pack(side="left", padx=(0 if i == 0 else 8, 0))
+    win.protocol("WM_DELETE_WINDOW", lambda: choose(buttons[-1][0]))
+    try:
+        win.lift()
+        win.attributes("-topmost", True)
+        win.after(200, lambda: win.attributes("-topmost", False))
+    except tk.TclError:
+        pass
+    parent.wait_window(win)
+    return result["value"]
+
+
+def alert_incomplete_flight(parent: tk.Tk, summary: str) -> str:
+    """Return 'resume', 'new', or 'later'."""
+    return _choice_dialog(
+        parent,
+        "Incomplete flight",
+        "Incomplete flight found",
+        (summary + "\n\nResume that flight, start a new one, or leave this in the tray for later.").strip(),
+        [("resume", "Resume"), ("new", "Start new"), ("later", "Later")],
+    )
+
+
+def alert_flight_interrupted(parent: tk.Tk) -> str:
+    """Return 'open' or 'later'."""
+    return _choice_dialog(
+        parent,
+        "Flight interrupted",
+        "Flight interrupted",
+        "The simulator crashed or returned to the menu. The restore point is kept. Open MSFS Resume to resume, or leave it in the tray.",
+        [("open", "Open"), ("later", "Later")],
+    )
+
+
+def tray_hint_dialog(parent: tk.Tk) -> bool:
+    """Explain tray start. Return True if the user still wants the reminder."""
+    win = tk.Toplevel(parent)
+    _style_win(win, "Running in the tray", "460x230")
+    keep = tk.BooleanVar(value=True)
+    pad = tk.Frame(win, bg=PANEL)
+    pad.pack(fill="both", expand=True, padx=16, pady=16)
+    tk.Label(pad, text="MSFS Resume is in the system tray", fg=GOLD, bg=PANEL, font=(FONT, 12, "bold")).pack(anchor="w")
+    tk.Label(
+        pad,
+        text="Look for the gold resume icon near the clock (it may be under the ^ arrow). Click it to open the window. You can turn this reminder off below, or later under File → Settings.",
+        fg=TEXT, bg=PANEL, font=(FONT, 9), wraplength=410, justify="left",
+    ).pack(anchor="w", pady=(8, 12))
+    tk.Checkbutton(
+        pad, text="Show this reminder next time", variable=keep, fg=TEXT, bg=PANEL,
+        activebackground=PANEL, activeforeground=TEXT, selectcolor=PANEL_2,
+        font=(FONT, 9), highlightthickness=0,
+    ).pack(anchor="w")
+    tk.Button(pad, text="OK", command=win.destroy, bg=GOLD, fg="#1a1408", font=(FONT, 10, "bold"), relief="flat", pady=6).pack(fill="x", pady=(14, 0))
+    try:
+        win.lift()
+        win.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    parent.wait_window(win)
+    return bool(keep.get())
 
 
 class DownloadProgress:

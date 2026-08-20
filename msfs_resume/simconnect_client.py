@@ -61,6 +61,13 @@ DOUBLE_FIELDS = (
     ("AUTOPILOT MASTER", b"Bool"),
     ("CAMERA STATE", b"Number"),
     ("IS SLEW ACTIVE", b"Bool"),
+    ("SEA LEVEL PRESSURE", b"millibars"),
+    ("KOHLSMAN SETTING MB", b"Millibars"),
+    ("ZULU YEAR", b"Number"),
+    ("ZULU MONTH OF YEAR", b"Number"),
+    ("ZULU DAY OF MONTH", b"Number"),
+    ("ZULU TIME", b"seconds"),
+    ("LOCAL TIME", b"seconds"),
 )
 
 # Cockpit / chase / drone-style views. World map and menus sit outside this set.
@@ -214,6 +221,13 @@ class LiveData:
         self.autopilot = False
         self.camera_state = 0
         self.slew = False
+        self.qnh_mb = 0.0
+        self.kohlsman_mb = 0.0
+        self.zulu_year = 0.0
+        self.zulu_month = 0.0
+        self.zulu_day = 0.0
+        self.zulu_time_sec = 0.0
+        self.local_time_sec = 0.0
         self.updated_at = 0.0
 
     @property
@@ -252,6 +266,13 @@ class LiveData:
             fuel_lb_per_gal=self.fuel_lb_per_gal,
             engines_running=self.engines_running,
             autopilot=self.autopilot,
+            qnh_mb=self.qnh_mb,
+            kohlsman_mb=self.kohlsman_mb,
+            zulu_year=self.zulu_year,
+            zulu_month=self.zulu_month,
+            zulu_day=self.zulu_day,
+            zulu_time_sec=self.zulu_time_sec,
+            local_time_sec=self.local_time_sec,
         )
 
 
@@ -477,6 +498,13 @@ class SimConnectClient:
             live.autopilot = values[19] > 0.5
             live.camera_state = int(values[20])
             live.slew = values[21] > 0.5
+            live.qnh_mb = values[22] if len(values) > 22 else 0.0
+            live.kohlsman_mb = values[23] if len(values) > 23 else 0.0
+            live.zulu_year = values[24] if len(values) > 24 else 0.0
+            live.zulu_month = values[25] if len(values) > 25 else 0.0
+            live.zulu_day = values[26] if len(values) > 26 else 0.0
+            live.zulu_time_sec = values[27] if len(values) > 27 else 0.0
+            live.local_time_sec = values[28] if len(values) > 28 else 0.0
             live.aircraft = title
             live.updated_at = time.time()
             if live.in_world:

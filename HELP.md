@@ -8,12 +8,12 @@ Virtual airlines are welcome to email about incorporating resume into their own 
 
 ## Typical flight
 
-1. Start MSFS Resume, then start the simulator.
+1. Start MSFS Resume (it may sit in the system tray — look for the gold icon near the clock).
 2. Optional: File → Settings and enter your SimBrief username or numeric ID.
 3. Fly as normal. Recording starts when the aircraft leaves the ground.
-4. If the sim crashes or you return to the menu, reopen MSFS Resume. Choose Resume flight.
-5. Spawn at the suggested nearby airport, set fuel to the saved amount, start engines, then set heading, flaps, gear and lights in the air.
-6. Click Restore flight. After a successful restore, recording continues from the new position.
+4. If the sim crashes or you return to the menu, a popup appears. Choose Resume flight.
+5. Spawn at the suggested nearby airport (Copy spawn ICAO if useful). Must-match items (aircraft, fuel, engines) have to be right before Restore is available. Useful items (QNH, sim time, heading, next waypoint, gear/flaps) are for you to set.
+6. Click Restore flight. If the warp is wrong, pick an earlier restore point from the list. After a successful restore, recording continues.
 7. Recording ends when you are parked with engines off.
 
 ## Resume vs new flight
@@ -29,6 +29,8 @@ File → Settings:
 - SimBrief username or ID — latest OFP is attached when a new takeoff is recorded
 - Fuel restore tolerance — how close current fuel must be to the saved value
 - Always on top
+- Start in the system tray
+- Show a reminder when starting in the tray
 
 ## Exit
 
@@ -48,7 +50,8 @@ Help → Changelog — what changed in each version.
 
 %AppData%\MsfsResume\
 
-- last_snapshot.json — last restore point
+- last_snapshot.json — latest restore point
+- snapshot_history.json — last few restore points
 - settings.json
 - airports_cache.json
 - error.log

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .settings import SNAPSHOT_PATH, ensure_app_dir
+from .settings import APP_DIR, SNAPSHOT_PATH, ensure_app_dir
 
 
 @dataclass
@@ -36,6 +36,14 @@ class FlightSnapshot:
     route: str = ""
     flight_number: str = ""
     aircraft_icao: str = ""
+    qnh_mb: float = 0.0
+    kohlsman_mb: float = 0.0
+    zulu_year: float = 0.0
+    zulu_month: float = 0.0
+    zulu_day: float = 0.0
+    zulu_time_sec: float = 0.0
+    local_time_sec: float = 0.0
+    waypoints: list = field(default_factory=list)
 
     @property
     def fuel_kg(self) -> float:
@@ -65,6 +73,8 @@ class FlightSnapshot:
         self.route = ofp.get("route", "") or self.route
         self.flight_number = ofp.get("flight_number", "") or self.flight_number
         self.aircraft_icao = ofp.get("aircraft_icao", "") or self.aircraft_icao
+        if ofp.get("waypoints"):
+            self.waypoints = list(ofp.get("waypoints") or [])
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -113,3 +123,86 @@ def clear_snapshot(path: Path | None = None) -> None:
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+HISTORY_PATH = APP_DIR / "snapshot_history.json"
+HISTORY_LIMIT = 5
+HISTORY_MIN_SECONDS = 120
+HISTORY_MIN_NM = 10.0
+
+
+def _age_seconds(newer: FlightSnapshot, older: FlightSnapshot) -> float:
+    try:
+        a = datetime.fromisoformat(newer.saved_at)
+        b = datetime.fromisoformat(older.saved_at)
+        if a.tzinfo is None:
+            a = a.replace(tzinfo=timezone.utc)
+        if b.tzinfo is None:
+            b = b.replace(tzinfo=timezone.utc)
+        return abs((a - b).total_seconds())
+    except ValueError:
+        return 0.0
+
+
+def consider_history(
+    snapshot: FlightSnapshot,
+    history: list[FlightSnapshot],
+    *,
+    force: bool = False,
+    limit: int = HISTORY_LIMIT,
+    min_seconds: float = HISTORY_MIN_SECONDS,
+    min_nm: float = HISTORY_MIN_NM,
+) -> list[FlightSnapshot]:
+    """Keep a short list of distinct restore points (not every 1-second sample)."""
+    from .airports import haversine_nm
+
+    if not history:
+        return [snapshot]
+    last = history[-1]
+    moved = haversine_nm(last.latitude, last.longitude, snapshot.latitude, snapshot.longitude)
+    aged = _age_seconds(snapshot, last)
+    if force or aged >= min_seconds or moved >= min_nm:
+        items = history + [snapshot]
+        return items[-limit:]
+    return history
+
+
+def load_history(path: Path | None = None) -> list[FlightSnapshot]:
+    target = path or HISTORY_PATH
+    if not target.exists():
+        return []
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    items = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        try:
+            items.append(FlightSnapshot.from_json(row))
+        except (TypeError, KeyError, ValueError):
+            continue
+    return items[-HISTORY_LIMIT:]
+
+
+def save_history(history: list[FlightSnapshot], path: Path | None = None) -> None:
+    ensure_app_dir()
+    target = path or HISTORY_PATH
+    payload = [item.to_json() for item in history[-HISTORY_LIMIT:]]
+    target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def clear_history(path: Path | None = None) -> None:
+    target = path or HISTORY_PATH
+    try:
+        target.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def clear_restore_data() -> None:
+    clear_snapshot()
+    clear_history()

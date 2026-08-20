@@ -1,5 +1,5 @@
 #define AppName "MSFS Resume"
-#define AppVersion "0.4.3"
+#define AppVersion "0.4.4"
 #define AppPublisher "Ostroforge"
 #define AppExeName "MSFSResume.exe"
 

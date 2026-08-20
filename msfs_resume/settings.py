@@ -22,6 +22,8 @@ def load_settings() -> dict:
         "fuel_floor_kg": DEFAULT_FLOOR_KG,
         "always_on_top": False,
         "simbrief_username": "",
+        "start_in_tray": True,
+        "show_tray_hint": True,
     }
     if not SETTINGS_PATH.exists():
         return defaults

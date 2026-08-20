@@ -54,6 +54,14 @@ class TrayIcon:
         except Exception:
             pass
 
+    def notify(self, message: str, title: str = "MSFS Resume") -> None:
+        if self._icon is None:
+            return
+        try:
+            self._icon.notify(message, title)
+        except Exception:
+            pass
+
     def set_tooltip(self, tooltip: str) -> None:
         if self._icon is not None:
             self._icon.title = tooltip

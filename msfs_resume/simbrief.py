@@ -7,6 +7,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .route import parse_waypoints
+
 SIMBRIEF_URL = "https://www.simbrief.com/api/xml.fetcher.php"
 
 
@@ -66,4 +68,5 @@ def parse_ofp(data: dict) -> dict:
         "route": str(general.get("route") or "").strip(),
         "flight_number": flight_number,
         "aircraft_icao": str(aircraft_icao).upper(),
+        "waypoints": parse_waypoints(data),
     }

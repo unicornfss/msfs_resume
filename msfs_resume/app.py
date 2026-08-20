@@ -5,29 +5,43 @@ from __future__ import annotations
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import webbrowser
 from datetime import datetime, timezone
 
 from . import __version__
+from .aircraft import aircraft_compatible
 from .airports import Airport, load_cache, min_runway_ft, nearest_suitable, refresh_cache
 from .applog import log_exception, logger, setup_logging
 from .constants import CONTACT_EMAIL
 from .dialogs import (
     DownloadProgress,
+    alert_flight_interrupted,
+    alert_incomplete_flight,
     confirm_exit_while_recording,
     open_about,
     open_changelog,
     open_error_log,
     open_help,
     open_settings,
+    tray_hint_dialog,
 )
 from .flight_state import COMPLETE, INTERRUPT, INTERRUPTED, RECORDING, RESUME, TAKEOFF, WAITING, FlightTracker
 from .fuel import fuel_band, in_band, kg_to_lb, lb_to_kg
+from .route import next_waypoint
 from .settings import load_settings, save_settings
 from .simbrief import SimBriefError, fetch_latest_ofp
 from .simconnect_client import SimConnectClient
-from .snapshot import FlightSnapshot, clear_snapshot, load_snapshot, save_snapshot
+from .snapshot import (
+    FlightSnapshot,
+    clear_restore_data,
+    clear_snapshot,
+    consider_history,
+    load_history,
+    load_snapshot,
+    save_history,
+    save_snapshot,
+)
 from .paths import bundled_file
 from .tray import TrayIcon
 from .updates import check_for_updates, download_installer, installer_dest
@@ -73,6 +87,42 @@ def _fmt_ll(lat: float, lon: float) -> str:
     return f"{abs(lat):.4f}°{ns}   {abs(lon):.4f}°{ew}"
 
 
+def _fmt_qnh(mb: float) -> str:
+    if mb <= 50:
+        return "—"
+    inhg = mb * 0.02953
+    return f"{mb:.0f} hPa   ({inhg:.2f} inHg)"
+
+
+def _fmt_clock(seconds: float) -> str:
+    total = int(seconds) % 86400
+    hours, rem = divmod(total, 3600)
+    minutes, _secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def _fmt_sim_time(snapshot: FlightSnapshot) -> str:
+    if snapshot.zulu_time_sec <= 0 and snapshot.zulu_year <= 0:
+        return "—"
+    zulu = _fmt_clock(snapshot.zulu_time_sec)
+    local = _fmt_clock(snapshot.local_time_sec)
+    date = ""
+    year, month, day = int(snapshot.zulu_year), int(snapshot.zulu_month), int(snapshot.zulu_day)
+    if year >= 2020 and 1 <= month <= 12 and 1 <= day <= 31:
+        date = f"{year:04d}-{month:02d}-{day:02d}  "
+    text = f"{date}{zulu}Z"
+    if snapshot.local_time_sec > 0:
+        text += f"   (local {local})"
+    return text
+
+
+def _history_label(snapshot: FlightSnapshot) -> str:
+    return (
+        f"{_age(snapshot.saved_at)}  ·  {_fmt_alt(snapshot.altitude_ft)}  ·  "
+        f"{_fmt_hdg(snapshot.heading_mag)}  ·  {_fmt_ias(snapshot.ias_kt)} IAS"
+    )
+
+
 def _age(iso: str) -> str:
     try:
         saved = datetime.fromisoformat(iso)
@@ -93,17 +143,21 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("MSFS Resume")
-        self.geometry("660x780")
-        self.minsize(580, 640)
+        self.geometry("660x920")
+        self.minsize(580, 740)
         self.configure(bg=BG)
         self.settings = load_settings()
         self.client = SimConnectClient()
         self.saved: FlightSnapshot | None = load_snapshot()
+        self._history: list[FlightSnapshot] = load_history()
+        if self.saved is None and self._history:
+            self.saved = self._history[-1]
         self.ofp: dict | None = None
         self._airports: list[Airport] = load_cache()
         self._airports_error = False
         self._restoring = False
         self._resume_intent = False
+        self._spawn_icao = ""
         self._mode = "choose" if self.saved else "wait"
         self.tracker = FlightTracker(INTERRUPTED if self.saved else WAITING)
         self._status = tk.StringVar(value="Starting…")
@@ -122,13 +176,108 @@ class App(tk.Tk):
         self.after(400, self._apply_chrome)
         self.client.start()
         self.after(200, self._show_mode)
+        self.after(500, self._startup_flow)
         self.after(400, self._tick)
-        self.after(2500, lambda: self._check_updates(True))
+        self.after(4000, lambda: self._check_updates(True))
         threading.Thread(target=self._load_airports, daemon=True).start()
 
     def _apply_chrome(self) -> None:
         apply_window_icon(self, bundled_file("assets", "msfs-resume.ico"))
         disable_close_button(self)
+
+    def _go_to_tray(self, tooltip: str | None = None) -> None:
+        self.withdraw()
+        tip = tooltip
+        if tip is None:
+            tip = "MSFS Resume — recording" if self._mode == "record" else "MSFS Resume"
+            if self._mode == "choose":
+                tip = "MSFS Resume — incomplete flight"
+        self._tray.show(tip)
+
+    def _startup_flow(self) -> None:
+        tray = bool(self.settings.get("start_in_tray"))
+        if tray:
+            self._go_to_tray()
+        if self.saved is not None:
+            self._alert_incomplete_launch()
+        elif tray and bool(self.settings.get("show_tray_hint", True)):
+            keep = tray_hint_dialog(self)
+            self.settings["show_tray_hint"] = keep
+            save_settings(self.settings)
+            self._tray.notify("MSFS Resume is running here. Click to open.")
+
+    def _alert_incomplete_launch(self) -> None:
+        snap = self.saved
+        summary = "A previous flight was not completed."
+        if snap is not None:
+            bits = [snap.aircraft or "Saved aircraft", _age(snap.saved_at)]
+            if snap.flight_number or snap.origin_icao:
+                bits.append(f"{snap.flight_number}  {snap.origin_icao} → {snap.dest_icao}".strip())
+            bits.append(f"{_fmt_alt(snap.altitude_ft)}  ·  {_fmt_hdg(snap.heading_mag)}")
+            summary = "\n".join(bits)
+        self._tray.notify("Incomplete flight found.")
+        choice = alert_incomplete_flight(self, summary)
+        if choice == "resume":
+            self._restore_from_tray()
+            self._choose_resume()
+        elif choice == "new":
+            self._restore_from_tray()
+            self._choose_new()
+        else:
+            self._go_to_tray("MSFS Resume — incomplete flight")
+
+    def _alert_crash(self) -> None:
+        self._tray.notify("Flight interrupted. Restore point kept.")
+        self._restore_from_tray()
+        choice = alert_flight_interrupted(self)
+        if choice == "later":
+            self._go_to_tray("MSFS Resume — incomplete flight")
+
+    def _apply_history(self, snapshot: FlightSnapshot, *, force: bool = False) -> None:
+        self._history = consider_history(snapshot, self._history, force=force)
+        try:
+            save_history(self._history)
+        except OSError as exc:
+            log_exception("Could not write restore-point history", exc)
+
+    def _fill_history_combo(self) -> None:
+        items = list(self._history)
+        if self.saved is not None and (not items or items[-1].saved_at != self.saved.saved_at):
+            items = items + [self.saved]
+        key = tuple(item.saved_at for item in items)
+        if key == getattr(self, "_history_combo_key", None):
+            return
+        self._history_combo_key = key
+        labels = [_history_label(item) for item in reversed(items)]
+        self._history_combo["values"] = labels
+        self._history_items = list(reversed(items))
+        if labels:
+            current = _history_label(self.saved) if self.saved else labels[0]
+            if current in labels:
+                self._history_var.set(current)
+            else:
+                self._history_combo.current(0)
+
+    def _pick_history(self, _event=None) -> None:
+        items = getattr(self, "_history_items", [])
+        idx = self._history_combo.current()
+        if idx < 0 or idx >= len(items):
+            return
+        self.saved = items[idx]
+        try:
+            save_snapshot(self.saved)
+        except OSError as exc:
+            log_exception("Could not write selected restore point", exc)
+        self._refresh()
+
+    def _copy_spawn_icao(self) -> None:
+        icao = self._spawn_icao.strip().upper()
+        if not icao:
+            messagebox.showinfo("Spawn ICAO", "No suggested airport yet. Wait for the airport list, or spawn as close as you can to the last position.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(icao)
+        self._message.set(f"Copied {icao} to the clipboard.")
 
     def _build(self) -> None:
         menubar = tk.Menu(self)
@@ -203,6 +352,7 @@ class App(tk.Tk):
             ("heading", "Heading"),
             ("ias", "Airspeed"),
             ("pos", "Position"),
+            ("waypoint", "Waypoint"),
         ):
             row = tk.Frame(self._record, bg=PANEL)
             row.pack(fill="x", pady=3)
@@ -217,25 +367,45 @@ class App(tk.Tk):
             self._restore, text="", fg=MUTED, bg=PANEL, font=(FONT, 9),
             wraplength=580, justify="left", anchor="w",
         )
-        self._restore_meta.pack(fill="x", pady=(4, 10))
+        self._restore_meta.pack(fill="x", pady=(4, 8))
+        tk.Label(self._restore, text="Restore point", fg=MUTED, bg=PANEL, font=(FONT, 9)).pack(anchor="w")
+        self._history_var = tk.StringVar()
+        self._history_combo = ttk.Combobox(
+            self._restore, textvariable=self._history_var, state="readonly", font=(FONT, 9),
+        )
+        self._history_combo.pack(fill="x", pady=(2, 8))
+        self._history_combo.bind("<<ComboboxSelected>>", self._pick_history)
         self._restore_rows: dict[str, tk.Label] = {}
+
+        tk.Label(self._restore, text="Must match", fg=GOLD, bg=PANEL, font=(FONT, 10, "bold")).pack(anchor="w", pady=(4, 4))
         for key, label in (
-            ("plan", "Flight"),
-            ("route", "Route"),
-            ("nearest", "Spawn near"),
+            ("sim", "Simulator"),
+            ("acft", "Aircraft"),
             ("fuel", "Fuel on board"),
             ("range", "Allowed range"),
             ("current", "Current fuel"),
+            ("engines", "Engines"),
+        ):
+            self._restore_row(key, label)
+
+        tk.Label(self._restore, text="Useful to set", fg=GOLD, bg=PANEL, font=(FONT, 10, "bold")).pack(anchor="w", pady=(10, 4))
+        for key, label in (
+            ("plan", "Flight"),
+            ("route", "Route"),
+            ("waypoint", "Next waypoint"),
+            ("nearest", "Spawn near"),
             ("heading", "Heading"),
             ("ias", "Airspeed"),
             ("alt", "Altitude"),
+            ("qnh", "QNH"),
+            ("simtime", "Sim time"),
+            ("extras", "Also check"),
         ):
-            row = tk.Frame(self._restore, bg=PANEL)
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text=label, fg=MUTED, bg=PANEL, font=(FONT, 9), width=14, anchor="nw").pack(side="left")
-            value = tk.Label(row, text="—", fg=TEXT, bg=PANEL, font=(FONT, 10, "bold"), anchor="w", justify="left", wraplength=430)
-            value.pack(side="left", fill="x", expand=True)
-            self._restore_rows[key] = value
+            self._restore_row(key, label)
+        tk.Button(
+            self._restore, text="Copy spawn ICAO", command=self._copy_spawn_icao,
+            bg=PANEL_2, fg=TEXT, font=(FONT, 9), relief="flat", pady=5, cursor="hand2",
+        ).pack(fill="x", pady=(4, 0))
         self._gate = tk.Label(self._restore, text="", fg=MUTED, bg=PANEL, font=(FONT, 10, "bold"), anchor="w", wraplength=580, justify="left")
         self._gate.pack(fill="x", pady=(10, 8))
         self._restore_btn = tk.Button(
@@ -251,6 +421,14 @@ class App(tk.Tk):
         tk.Label(self, textvariable=self._message, fg=MUTED, bg=BG, font=(FONT, 9), wraplength=620, justify="left").pack(
             fill="x", padx=16, pady=(6, 12),
         )
+
+    def _restore_row(self, key: str, label: str) -> None:
+        row = tk.Frame(self._restore, bg=PANEL)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text=label, fg=MUTED, bg=PANEL, font=(FONT, 9), width=14, anchor="nw").pack(side="left")
+        value = tk.Label(row, text="—", fg=TEXT, bg=PANEL, font=(FONT, 10, "bold"), anchor="w", justify="left", wraplength=430)
+        value.pack(side="left", fill="x", expand=True)
+        self._restore_rows[key] = value
 
     def _panel(self) -> tk.Frame:
         frame = tk.Frame(self._body, bg=PANEL)
@@ -422,10 +600,13 @@ class App(tk.Tk):
                     self._on_takeoff(new_flight=True)
                 elif update.event == INTERRUPT:
                     self._message.set("Flight interrupted. Restore is kept until you finish or start a new flight.")
+                    if self.saved is not None:
+                        self._apply_history(self.saved, force=True)
                     if self._mode == "record":
                         self._mode = "choose"
                         self._resume_intent = False
                         self.after(0, self._show_mode)
+                        self.after(0, self._alert_crash)
                 elif update.event == COMPLETE:
                     self._finish_flight("Flight complete — parked with engines off. Waiting for the next takeoff.")
         if self.tracker.phase == RECORDING and not self._resume_setup_active():
@@ -434,6 +615,7 @@ class App(tk.Tk):
                 self.saved = snap
                 try:
                     save_snapshot(snap)
+                    self._apply_history(snap)
                 except OSError as exc:
                     log_exception("Could not write snapshot file", exc)
         self._refresh()
@@ -449,8 +631,9 @@ class App(tk.Tk):
 
     def _on_takeoff(self, new_flight: bool) -> None:
         if new_flight and self.saved and self._mode in {"choose", "restore", "wait"}:
-            clear_snapshot()
+            clear_restore_data()
             self.saved = None
+            self._history = []
             self.ofp = None
         self._resume_intent = False
         self.tracker.reset(RECORDING)
@@ -484,8 +667,10 @@ class App(tk.Tk):
     def _finish_flight(self, message: str) -> None:
         self.saved = None
         self.ofp = None
+        self._history = []
         self._resume_intent = False
-        clear_snapshot()
+        self._spawn_icao = ""
+        clear_restore_data()
         self.tracker.reset(WAITING)
         self._mode = "wait"
         self._message.set(message)
@@ -521,12 +706,15 @@ class App(tk.Tk):
         aircraft = snapshot.aircraft_icao or snapshot.aircraft
         needed = min_runway_ft(aircraft)
         if not self._airports:
+            self._spawn_icao = ""
             if getattr(self, "_airports_error", False):
                 return "Could not download the airport list. Spawn as close as you can to the last position."
             return f"Airport list still loading… spawn as close as you can to the last position. Need ~{needed:,} ft runway."
         matches = nearest_suitable(snapshot.latitude, snapshot.longitude, aircraft, self._airports, limit=3)
         if not matches:
+            self._spawn_icao = ""
             return f"No matching airport found nearby. Need about {needed:,} ft of runway."
+        self._spawn_icao = matches[0][0].icao
         lines = []
         for airport, distance in matches:
             extra = "  (suggested spawn)" if not lines else ""
@@ -588,6 +776,20 @@ class App(tk.Tk):
             self._record_rows["heading"].config(text=_fmt_hdg(heading) if connected else "—")
             self._record_rows["ias"].config(text=f"{_fmt_ias(ias)} IAS" if connected else "—")
             self._record_rows["pos"].config(text=_fmt_ll(lat, lon) if connected and in_world else "Waiting for sim…")
+            waypoints = []
+            if snapshot and snapshot.waypoints:
+                waypoints = snapshot.waypoints
+            elif self.ofp:
+                waypoints = self.ofp.get("waypoints") or []
+            nxt = next_waypoint(lat, lon, waypoints) if connected and in_world else None
+            if nxt:
+                self._record_rows["waypoint"].config(text=nxt.as_text())
+            elif waypoints:
+                self._record_rows["waypoint"].config(text="Waiting for position…")
+            elif (snapshot and snapshot.route) or (self.ofp and self.ofp.get("route")):
+                self._record_rows["waypoint"].config(text="SimBrief route text only — no navlog coordinates yet.")
+            else:
+                self._record_rows["waypoint"].config(text="No SimBrief route")
             plan = ""
             if snapshot and snapshot.has_ofp:
                 plan = f"{snapshot.flight_number}  {snapshot.origin_icao} → {snapshot.dest_icao}".strip()
@@ -607,6 +809,15 @@ class App(tk.Tk):
             ).strip()
         self._restore_rows["plan"].config(text=plan)
         self._restore_rows["route"].config(text=snapshot.route or "—")
+        nxt = next_waypoint(snapshot.latitude, snapshot.longitude, snapshot.waypoints)
+        if nxt:
+            self._restore_rows["waypoint"].config(text=nxt.as_text())
+        elif snapshot.route:
+            self._restore_rows["waypoint"].config(
+                text="Route is stored as text only — SimBrief navlog coordinates were not saved for this flight."
+            )
+        else:
+            self._restore_rows["waypoint"].config(text="No SimBrief route for this flight.")
         self._restore_rows["nearest"].config(text=self._nearest_text(snapshot))
         low, high = self._band(snapshot)
         self._restore_rows["fuel"].config(text=f"{_fmt_kg(snapshot.fuel_kg)}   ({_fmt_lb(snapshot.fuel_lb)})")
@@ -614,14 +825,37 @@ class App(tk.Tk):
         self._restore_rows["heading"].config(text=_fmt_hdg(snapshot.heading_mag))
         self._restore_rows["ias"].config(text=f"{_fmt_ias(snapshot.ias_kt)} IAS")
         self._restore_rows["alt"].config(text=_fmt_alt(snapshot.altitude_ft))
+        qnh = _fmt_qnh(snapshot.qnh_mb)
+        kohlsman = _fmt_qnh(snapshot.kohlsman_mb)
+        if kohlsman != "—":
+            qnh = f"{qnh}  ·  set altimeter {kohlsman}" if qnh != "—" else f"Set altimeter {kohlsman}"
+        self._restore_rows["qnh"].config(text=qnh)
+        self._restore_rows["simtime"].config(text=_fmt_sim_time(snapshot))
+        extras = "Gear, flaps, lights and FMC/MCDU after you are airborne."
+        if snapshot.autopilot:
+            extras = "Autopilot was on. " + extras
+        self._restore_rows["extras"].config(text=extras)
+        self._fill_history_combo()
         self._restore_meta.config(
             text=f"{snapshot.aircraft}  ·  saved {_age(snapshot.saved_at)}. "
-            "Set fuel first. Taking off to set heading, flaps, gear and lights will not start a new flight. "
-            "FMC/MCDU is not restored — re-enter the route if needed."
+            "Items under Must match block restore. Useful items are for you to set in the sim."
+        )
+
+        sim_ok = connected and in_world
+        self._restore_rows["sim"].config(
+            text="Connected and in the world" if sim_ok else ("Waiting for sim…" if not connected else "Load the aircraft in the world"),
+            fg=GOOD if sim_ok else MUTED,
+        )
+        ac_ok = aircraft_compatible(aircraft, snapshot.aircraft, snapshot.aircraft_icao) if sim_ok else False
+        saved_ac = snapshot.aircraft_icao or snapshot.aircraft or "saved aircraft"
+        live_ac = aircraft or "—"
+        self._restore_rows["acft"].config(
+            text=f"Saved {saved_ac}  ·  live {live_ac}",
+            fg=GOOD if ac_ok else (BAD if sim_ok else MUTED),
         )
 
         fuel_ok = False
-        if connected and in_world:
+        if sim_ok:
             fuel_ok = in_band(current_fuel_kg, low, high)
             self._restore_rows["current"].config(
                 text=f"{_fmt_kg(current_fuel_kg)}   ({_fmt_lb(kg_to_lb(current_fuel_kg))})",
@@ -631,21 +865,31 @@ class App(tk.Tk):
             self._restore_rows["current"].config(text="Waiting for sim…", fg=MUTED)
 
         airborne_ok = snapshot.on_ground or engines
-        can_restore = connected and in_world and fuel_ok and airborne_ok and not self._restoring
+        self._restore_rows["engines"].config(
+            text="Not required (ground snapshot)" if snapshot.on_ground else ("Running" if engines else "Start engines before restoring"),
+            fg=GOOD if airborne_ok else BAD,
+        )
+        can_restore = sim_ok and ac_ok and fuel_ok and airborne_ok and not self._restoring
         if can_restore:
-            self._gate.config(text="Fuel in range — restore is available", fg=GOOD)
+            self._gate.config(text="Must-match items are OK — restore is available", fg=GOOD)
             self._restore_btn.config(state="normal", bg=GOLD, fg="#1a1408")
         elif not connected:
-            self._gate.config(text="Connect to MSFS and load the aircraft before restoring", fg=MUTED)
+            self._gate.config(text="Must match: connect to MSFS and load the aircraft", fg=MUTED)
+            self._restore_btn.config(state="disabled", bg=LINE, fg=MUTED)
+        elif not in_world:
+            self._gate.config(text="Must match: load into the world, not the menu", fg=MUTED)
+            self._restore_btn.config(state="disabled", bg=LINE, fg=MUTED)
+        elif not ac_ok:
+            self._gate.config(text=f"Must match: load {saved_ac} (live aircraft is {live_ac})", fg=BAD)
             self._restore_btn.config(state="disabled", bg=LINE, fg=MUTED)
         elif not fuel_ok:
             self._gate.config(
-                text=f"Set fuel to {_fmt_kg(snapshot.fuel_kg)}  (allowed {_fmt_kg(low)} – {_fmt_kg(high)})",
+                text=f"Must match: set fuel to {_fmt_kg(snapshot.fuel_kg)}  (allowed {_fmt_kg(low)} – {_fmt_kg(high)})",
                 fg=BAD,
             )
             self._restore_btn.config(state="disabled", bg=LINE, fg=MUTED)
         elif not airborne_ok:
-            self._gate.config(text="Start the engines before restoring an airborne snapshot", fg=BAD)
+            self._gate.config(text="Must match: start the engines before restoring an airborne snapshot", fg=BAD)
             self._restore_btn.config(state="disabled", bg=LINE, fg=MUTED)
         else:
             self._gate.config(text="Restore unavailable", fg=MUTED)
@@ -658,10 +902,18 @@ class App(tk.Tk):
         low, high = self._band(snapshot)
         with self.client.lock:
             current = lb_to_kg(self.client.live.fuel_lb)
+            live_aircraft = self.client.live.aircraft
         if not in_band(current, low, high):
             messagebox.showwarning(
                 "Fuel out of range",
                 f"Set fuel to {_fmt_kg(snapshot.fuel_kg)}.\nAllowed: {_fmt_kg(low)} – {_fmt_kg(high)}.",
+            )
+            return
+        if not aircraft_compatible(live_aircraft, snapshot.aircraft, snapshot.aircraft_icao):
+            messagebox.showwarning(
+                "Aircraft mismatch",
+                f"Load {snapshot.aircraft_icao or snapshot.aircraft} before restoring.\n"
+                f"Live aircraft: {live_aircraft or 'unknown'}.",
             )
             return
         self._restoring = True

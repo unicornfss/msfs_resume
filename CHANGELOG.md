@@ -2,6 +2,16 @@
 
 All notable changes to MSFS Resume are listed here.
 
+## 0.4.4
+
+- Restore card shows QNH and simulator time
+- Copy spawn ICAO to the clipboard
+- Last few restore points kept (about every 2 minutes or 10 nm) so an earlier point can be chosen
+- Starts in the system tray, with a reminder that can be turned off
+- Popup if an incomplete flight is found on launch, and if a sim crash / return to menu is detected
+- Next waypoint estimated from SimBrief navlog (recording and restore screens)
+- Restore checklist split into Must match (sim, aircraft, fuel, engines) and Useful to set (QNH, time, heading, spawn, gear/flaps)
+
 ## 0.4.3
 
 - Check for updates downloads the installer and can run it (the app closes so files can be replaced)
